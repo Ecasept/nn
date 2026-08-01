@@ -1,29 +1,21 @@
 const std = @import("std");
+const dataLoader = @import("data.zig");
 
 pub fn main(init: std.process.Init) void {
-    train(init.gpa) catch |err| {
+    var threadedIo = std.Io.Threaded.init_single_threaded;
+    const io = threadedIo.io();
+
+    train(init.gpa, io) catch |err| {
         std.log.err("err: {}", .{err});
     };
 }
 
-fn TrainingData(comptime data: type, comptime label: type) type {
-    return struct {
-        data: data,
-        label: label,
-    };
-}
-const TD = TrainingData([2]f32, [1]f32);
-
 var prng = std.Random.DefaultPrng.init(67);
 const rand = prng.random();
 
-pub fn createTrainingData() [4]TD {
-    return .{ .{ .data = .{ 0, 0 }, .label = .{0} }, .{ .data = .{ 0, 1 }, .label = .{1} }, .{ .data = .{ 1, 0 }, .label = .{1} }, .{ .data = .{ 1, 0 }, .label = .{0} } };
-}
-
 pub fn randomInit(slice: []f32) void {
     for (slice) |*el| {
-        el.* = rand.float(f32);
+        el.* = rand.float(f32) - 0.5;
     }
 }
 const Layout = struct {
@@ -213,21 +205,14 @@ const Network = struct {
         }
         return std.math.pow(f32, err, 2);
     }
-    pub fn calculateErrorDerivative(self: Network, activations: Layout.NeuronLayout(false), correctOutput: []const f32) f32 {
-        var err: f32 = 0;
+    pub fn calculateErrorDerivative(self: Network, activations: Layout.NeuronLayout(false), correctOutput: []const f32, deriv: []f32) void {
         const modelOutput = activations.getLayer(self.layerCount - 1);
-        if (modelOutput.len == 1) {
-            err = modelOutput[0] - correctOutput[0];
-        } else {
-            for (0..modelOutput.len) |i| {
-                const val = modelOutput[i] - correctOutput[i];
-                err += std.math.pow(f32, val, 2);
-            }
-            err = std.math.sqrt(err);
+        for (0..modelOutput.len) |i| {
+            deriv[i] = 2 * (modelOutput[i] - correctOutput[i]);
         }
-        return 2 * err;
     }
-    pub fn calculateGradients(self: Network, activations: Layout.NeuronLayout(false), gradients: Gradients, costDerivative: f32) void {
+    pub fn calculateGradients(self: Network, activations: Layout.NeuronLayout(false), gradients: Gradients, correctOutput: []const f32, costDerivatives: []f32) void {
+        self.calculateErrorDerivative(activations, correctOutput, costDerivatives);
         var layerIdx = self.layerCount;
         while (layerIdx > 1) {
             layerIdx -= 1;
@@ -253,9 +238,9 @@ const Network = struct {
                     biasGradients[i] = activationDeriv(activations.getNeuron(layerIdx, i).*) * biasGradients[i];
                 }
             } else {
-                // For the input layer, all the other terms don't exist yet
+                // For the last layer, all the other terms don't exist yet
                 for (0..biasGradients.len) |i| {
-                    biasGradients[i] = activationDeriv(activations.getNeuron(layerIdx, i).*) * costDerivative;
+                    biasGradients[i] = activationDeriv(activations.getNeuron(layerIdx, i).*) * costDerivatives[i];
                 }
             }
 
@@ -264,51 +249,147 @@ const Network = struct {
         }
     }
     pub fn applyBackPropagation(self: Network, gradients: Gradients) void {
-        const eta = 0.001;
         for (1..self.layerCount) |i| {
             for (0..self.layers[i]) |j| {
-                self.biases.getNeuron(i, j).* -= eta * gradients.biases.getNeuron(i, j).*;
+                self.biases.getNeuron(i, j).* -= LEARNING_RATE * gradients.biases.getNeuron(i, j).*;
             }
         }
         for (1..self.layerCount) |i| {
             for (0..self.layers[i]) |j| {
                 for (0..self.layers[i - 1]) |k| {
-                    self.weights.getWeight(i, j, k).* -= eta * gradients.weights.getWeight(i, j, k).*;
+                    self.weights.getWeight(i, j, k).* -= LEARNING_RATE * gradients.weights.getWeight(i, j, k).*;
                 }
             }
         }
     }
 };
 
-const epochs = 10000;
+const EPOCHS = 10;
+const LEARNING_RATE = 0.1;
+const PROGRESS_COUNT = EPOCHS;
 
-pub fn activation(x: f32) f32 {
-    return if (x > 0) x else 0.1;
+pub fn leakyReLU(comptime leakyFactor: f32) fn (f32) f32 {
+    return struct {
+        fn closure(x: f32) f32 {
+            return if (x > 0) x else leakyFactor;
+        }
+    }.closure;
 }
-pub fn activationDeriv(x: f32) f32 {
+pub fn reluDeriv(x: f32) f32 {
     return if (x > 0) 1 else 0;
 }
 
-pub fn train(allocator: std.mem.Allocator) !void {
-    const trainingData = createTrainingData();
-    const layers = [_]usize{ 2, 3, 1 };
-    const network = try Network.init(allocator, &layers);
+pub fn sigmoid(x: f32) f32 {
+    return 1.0 / (1 + std.math.exp(-x));
+}
+pub fn sigmoidDeriv(x: f32) f32 {
+    return sigmoid(x) * (1 - sigmoid(x));
+}
+pub fn sigmoidDerivFromActivation(x: f32) f32 {
+    return x * (1 - x);
+}
 
-    const activations = try network.initActivations();
-    const gradients = try network.initGradients();
+pub fn activation(x: f32) f32 {
+    return sigmoid(x);
+}
+pub fn activationDeriv(x: f32) f32 {
+    return sigmoidDerivFromActivation(x);
+}
 
-    for (0..epochs) |_| {
-        for (trainingData) |dataPoint| {
-            network.computeActivations(&dataPoint.data, activations);
-            const err = network.calculateError(activations, &dataPoint.label);
-            const costDeriv = network.calculateErrorDerivative(activations, &dataPoint.label);
-            network.calculateGradients(activations, gradients, costDeriv);
-            network.applyBackPropagation(gradients);
-            std.debug.print("Error: {}\n", .{err});
-            std.debug.print("Input: {any}, Output: {any}, Net: {any}\n", .{ dataPoint.data, dataPoint.label, activations.getLayer(network.layerCount - 1) });
+pub fn maxIndex(comptime T: type, slice: []T, lowest: T) usize {
+    var maxIdx: usize = 0;
+    var maxVal: T = lowest;
+    for (0..slice.len) |i| {
+        if (slice[i] > maxVal) {
+            maxIdx = i;
+            maxVal = slice[i];
         }
     }
-    activations.deinit();
-    gradients.deinit();
-    network.deinit();
+    return maxIdx;
+}
+
+const NetworkRunner = struct {
+    layers: []const usize,
+    network: Network,
+    activations: Layout.NeuronLayout(false),
+    gradients: Gradients,
+    costDerivatives: []f32,
+    trainingData: std.ArrayList(dataLoader.DataPoint),
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, filename: []const u8, layers: []const usize) !NetworkRunner {
+        const network = try Network.init(allocator, layers);
+        return NetworkRunner{ .allocator = allocator, .layers = layers, .network = network, .activations = try network.initActivations(), .gradients = try network.initGradients(), .costDerivatives = try allocator.alloc(f32, layers[layers.len - 1]), .trainingData = try dataLoader.loadData(allocator, io, filename) };
+    }
+    pub fn deinit(self: *NetworkRunner) void {
+        self.allocator.free(self.costDerivatives);
+        self.activations.deinit();
+        self.gradients.deinit();
+        self.network.deinit();
+        for (self.trainingData.items) |dataPoint| {
+            dataPoint.deinit();
+        }
+        self.trainingData.deinit(self.allocator);
+    }
+    pub fn trainEpoch(self: NetworkRunner) f32 {
+        var accCost: f32 = 0;
+        for (self.trainingData.items) |dataPoint| {
+            self.network.computeActivations(dataPoint.data, self.activations);
+            const err = self.network.calculateError(self.activations, dataPoint.label);
+            accCost += err;
+            self.network.calculateGradients(self.activations, self.gradients, dataPoint.label, self.costDerivatives);
+            self.network.applyBackPropagation(self.gradients);
+        }
+        return accCost / @as(f32, @floatFromInt(self.trainingData.items.len));
+    }
+    pub fn testEpoch(self: NetworkRunner) f32 {
+        var correct: u64 = 0;
+        for (self.trainingData.items) |dataPoint| {
+            self.network.computeActivations(dataPoint.data, self.activations);
+            const modelOut = self.activations.getLayer(self.layers.len - 1);
+            const modelAnswer = maxIndex(f32, modelOut, 0);
+            const correctAnswer = maxIndex(f32, dataPoint.label, 0);
+            if (modelAnswer == correctAnswer) {
+                correct += 1;
+            }
+        }
+        return @as(f32, @floatFromInt(correct)) / @as(f32, @floatFromInt(self.trainingData.items.len));
+    }
+    pub fn switchDataset(self: *NetworkRunner, io: std.Io, filename: []const u8) !void {
+        // Free current dataset
+        for (self.trainingData.items) |dataPoint| {
+            dataPoint.deinit();
+        }
+        self.trainingData.deinit(self.allocator);
+        // Load new dataset
+        self.trainingData = try dataLoader.loadData(self.allocator, io, filename);
+    }
+};
+
+pub fn train(allocator: std.mem.Allocator, io: std.Io) !void {
+    const layers = [_]usize{ dataLoader.MNIST_SIZE, 32, 10 };
+    var networkRunner = try NetworkRunner.init(allocator, io, "mnist_train.csv", &layers);
+    defer networkRunner.deinit();
+
+    std.debug.print("Training...\n", .{});
+    const start = std.Io.Clock.real.now(io).toMilliseconds();
+
+    var epoch: u64 = 1;
+    while (epoch <= EPOCHS) : (epoch += 1) {
+        const cost = networkRunner.trainEpoch();
+        if (epoch % @divExact(EPOCHS, PROGRESS_COUNT) == 0) {
+            std.debug.print("\n", .{});
+            std.debug.print("Epoch {}\n", .{epoch});
+            std.debug.print("Cost: {}\n", .{cost});
+            // std.debug.print("Input: {any}, Output: {any}, Net: {any}\n", .{ dataPoint.data, dataPoint.label, activations.getLayer(network.layerCount - 1) });
+            // std.debug.print("Weights: {any}, Biases: {any}\n", .{ network.weights.data, network.biases.data });
+            // std.debug.print("Gradients: {any}, and {any}\n", .{ gradients.weights.data, gradients.biases.data });
+
+            const now = std.Io.Clock.real.now(io).toMilliseconds();
+            const msPerEpoch = @as(f32, @floatFromInt(now - start)) / @as(f32, @floatFromInt(epoch));
+            std.debug.print("ETA: {}s ({}s/epoch)\n", .{ msPerEpoch * @as(f32, @floatFromInt(EPOCHS - epoch)) / 1000.0, msPerEpoch / 1000.0 });
+        }
+    }
+    try networkRunner.switchDataset(io, "mnist_test.csv");
+    std.debug.print("Test performance: {d}%\n", .{networkRunner.testEpoch() * 100});
 }
