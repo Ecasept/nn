@@ -1,27 +1,22 @@
 const std = @import("std");
+const dl = @import("lib/data_loader.zig");
 
 pub const MNIST_SIZE = 784;
-
-pub const DataPoint = struct {
-    data: []f32,
-    label: []f32,
-    allocator: std.mem.Allocator,
-    pub fn deinit(self: DataPoint) void {
-        self.allocator.free(self.data);
-        self.allocator.free(self.label);
-    }
-};
 
 const CSVError = error{
     Malformed,
 };
 
-pub fn loadData(allocator: std.mem.Allocator, io: std.Io, filename: []const u8) !std.ArrayList(DataPoint) {
+pub fn getDataLoader() dl.DataLoader {
+    return .{ .loadData = loadData };
+}
+
+pub fn loadData(allocator: std.mem.Allocator, io: std.Io, filename: []const u8) !std.ArrayList(dl.DataPoint) {
     std.debug.print("Loading data...\n", .{});
     const buffer = try std.Io.Dir.cwd().readFileAlloc(io, filename, allocator, std.Io.Limit.unlimited);
     defer allocator.free(buffer);
 
-    var dataList = try std.ArrayList(DataPoint).initCapacity(allocator, 100);
+    var dataList = try std.ArrayList(dl.DataPoint).initCapacity(allocator, 100);
 
     var rowIter = std.mem.splitSequence(u8, buffer, "\n");
     while (rowIter.next()) |row| {
@@ -43,7 +38,7 @@ pub fn loadData(allocator: std.mem.Allocator, io: std.Io, filename: []const u8) 
             const num = try std.fmt.parseInt(u8, str, 10);
             data[i] = @as(f32, @floatFromInt(num)) / 255.0;
         }
-        const dataPoint = DataPoint{
+        const dataPoint = dl.DataPoint{
             .data = data,
             .label = label,
             .allocator = allocator,
