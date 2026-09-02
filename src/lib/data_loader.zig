@@ -10,6 +10,18 @@ pub const DataPoint = struct {
     }
 };
 
+const LoadDataFn = *const fn (std.mem.Allocator, std.Io, []const u8) anyerror!std.ArrayList(DataPoint);
+
 pub const DataLoader = struct {
-    loadData: *const fn (std.mem.Allocator, std.Io, []const u8) anyerror!std.ArrayList(DataPoint),
+    loadData: LoadDataFn,
 };
+
+pub fn dataLoaderFrom(loadDataFn: LoadDataFn) DataLoader {
+    return .{ .loadData = loadDataFn };
+}
+pub const EMPTY_DATA_LOADER = dataLoaderFrom(struct {
+    fn loadData(allocator: std.mem.Allocator, _: std.Io, _: []const u8) anyerror!std.ArrayList(DataPoint) {
+        const list = std.ArrayList(DataPoint).initCapacity(allocator, 0);
+        return list;
+    }
+}.loadData);

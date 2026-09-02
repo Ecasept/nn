@@ -175,13 +175,30 @@ pub const NetworkRunner = struct {
         }
         return @as(f32, @floatFromInt(correct)) / @as(f32, @floatFromInt(self.trainingData.items.len));
     }
-    pub fn predict(self: NetworkRunner, input: []f32) usize {
+
+    /// Must call `self.releaseActivationView(activations)` after using the returned activations.
+    /// Computes the activations for a single input instance (instead of a batch) and returns the activations. The returned activations are a view of the internal activations, so they should not be modified.
+    fn computeActivationsSingleInstance(self: NetworkRunner, input: []const f32) layout.BatchedNeuronLayout(false) {
         @memcpy(self.batchInputs.getRow(0), input);
         const inputs = self.batchInputs.view(self.layers[0].size, 1);
         const activations = self.activationView(1);
-        defer self.releaseActivationView(activations);
         self.network.computeActivations(inputs, activations);
-        return maxIndex(f32, activations.getLayer(self.layers.len - 1).getRow(0), 0);
+        return activations;
+    }
+    /// Copies the model output for a single input instance into the provided output slice.
+    pub fn getModelOutput(self: NetworkRunner, input: []const f32, output: []f32) void {
+        const activations = self.computeActivationsSingleInstance(input);
+        const modelOutput = activations.getLayer(self.layers.len - 1).getRow(0);
+        @memcpy(output, modelOutput);
+        self.releaseActivationView(activations);
+    }
+    /// Predicts the class for a single input instance based on the maximum output neuron value. Returns the index of the predicted class.
+    pub fn predict(self: NetworkRunner, input: []const f32) usize {
+        const activations = self.computeActivationsSingleInstance(input);
+        const modelOutput = activations.getLayer(self.layers.len - 1).getRow(0);
+        const prediction = maxIndex(f32, modelOutput, 0);
+        self.releaseActivationView(activations);
+        return prediction;
     }
     pub fn switchDataset(self: *NetworkRunner, io: std.Io, filename: []const u8) !void {
         // Free current dataset
