@@ -11,5 +11,5 @@ pub const DataPoint = struct {
 };
 
 pub const DataLoader = struct {
-    loadData: fn (std.mem.Allocator, std.Io, []const u8) []DataPoint,
+    loadData: *const fn (std.mem.Allocator, std.Io, []const u8) anyerror!std.ArrayList(DataPoint),
 };

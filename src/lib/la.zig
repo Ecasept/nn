@@ -220,6 +220,27 @@ pub fn mapMatRuntime(operand: anytype, operation: *const fn (f32) f32) MapFrog2D
     return .{ .f = operand, .operation = operation };
 }
 
+pub fn ScaleFrog2D(comptime baseType: type, comptime F: type) type {
+    return struct {
+        f: F,
+        scalar: baseType,
+
+        pub inline fn width(self: @This()) usize {
+            return self.f.width();
+        }
+        pub inline fn height(self: @This()) usize {
+            return self.f.height();
+        }
+        pub inline fn get(self: @This(), row: usize, column: usize) baseType {
+            return self.f.get(row, column) * self.scalar;
+        }
+    };
+}
+
+pub fn scale(operand: anytype, scalar: f32) ScaleFrog2D(f32, @TypeOf(operand)) {
+    return .{ .f = operand, .scalar = scalar };
+}
+
 pub fn TransposeFrog(comptime baseType: type, comptime F: type) type {
     return struct {
         f: F,
@@ -252,10 +273,6 @@ pub fn RowFrog(comptime baseType: type, comptime F: type) type {
     };
 }
 
-pub fn matRow(f: anytype, r: usize) RowFrog(f32, @TypeOf(f)) {
-    return .{ .f = f, .row = r };
-}
-
 pub fn ColumnFrog(comptime baseType: type, comptime F: type) type {
     return struct {
         f: F,
@@ -269,8 +286,40 @@ pub fn ColumnFrog(comptime baseType: type, comptime F: type) type {
     };
 }
 
-pub fn matColumn(f: anytype, c: usize) ColumnFrog(f32, @TypeOf(f)) {
-    return .{ .f = f, .column = c };
+pub fn GeneratorFrog(comptime baseType: type, comptime generator: fn (usize) baseType) type {
+    return struct {
+        length: usize,
+        pub inline fn len(self: @This()) usize {
+            return self.length;
+        }
+        pub inline fn get(_: @This(), r: usize) baseType {
+            return generator(r);
+        }
+    };
+}
+
+pub fn BroadcastRowFrog(comptime baseType: type, comptime F: type) type {
+    return struct {
+        f: F,
+        _height: usize,
+        pub inline fn width(self: @This()) usize {
+            return self.f.len();
+        }
+        pub inline fn height(self: @This()) usize {
+            return self.height;
+        }
+        pub inline fn get(self: @This(), _: usize, column: usize) baseType {
+            return self.f.get(column);
+        }
+    };
+}
+
+pub fn broadcastRows(sliceFrog: anytype, height: usize) BroadcastRowFrog(f32, @TypeOf(sliceFrog)) {
+    return .{ .f = sliceFrog, ._height = height };
+}
+
+pub fn generate(comptime generator: fn (usize) f32, length: usize) GeneratorFrog(f32, generator) {
+    return .{ .length = length };
 }
 
 pub fn dot(op1: anytype, op2: anytype) f32 {
@@ -297,14 +346,22 @@ pub fn store(data: anytype, out: []f32) void {
     }
 }
 
-pub fn storeMat(data: anytype, out: [][]f32) void {
-    std.debug.assert(out.len == data.height());
+pub fn storeMat(data: anytype, out: anytype) void {
+    std.debug.assert(out.height() == data.height());
     for (0..data.height()) |r| {
-        std.debug.assert(out[r].len == data.width());
+        std.debug.assert(out.width() == data.width());
         for (0..data.width()) |c| {
-            out[r][c] = data.get(r, c);
+            out.set(r, c, data.get(r, c));
         }
     }
+}
+
+pub fn matCol(matrix: anytype, colIdx: usize) ColumnFrog(f32, @TypeOf(matrix)) {
+    return .{ .f = matrix, .column = colIdx };
+}
+
+pub fn matRow(matrix: anytype, rowIdx: usize) RowFrog(f32, @TypeOf(matrix)) {
+    return .{ .f = matrix, .row = rowIdx };
 }
 
 pub fn copy(noalias src: []const f32, noalias dst: []f32) void {
@@ -316,7 +373,16 @@ pub fn Matrix(comptime T: type) type {
         data: []T,
         _width: usize,
         _height: usize,
+        allocator: std.mem.Allocator,
 
+        pub inline fn init(allocator: std.mem.Allocator, w: usize, h: usize) !Matrix(T) {
+            var matrix: @This() = .{ .data = undefined, ._width = w, ._height = h, .allocator = allocator };
+            matrix.data = try allocator.alloc(T, w * h);
+            return matrix;
+        }
+        pub inline fn deinit(self: @This()) void {
+            self.allocator.free(self.data);
+        }
         pub inline fn width(self: @This()) usize {
             return self._width;
         }
@@ -329,8 +395,17 @@ pub fn Matrix(comptime T: type) type {
         pub inline fn getRow(self: @This(), r: usize) []T {
             return self.data[self.index(r, 0)..self.index(r + 1, 0)];
         }
+        pub inline fn getColumnFrog(self: @This(), c: usize) ColumnFrog(f32, Matrix(T)) {
+            return .{ .f = self, .column = c };
+        }
+        pub inline fn getRowFrog(self: @This(), r: usize) RowFrog(f32, Matrix(T)) {
+            return .{ .f = self, .row = r };
+        }
         pub inline fn get(self: @This(), r: usize, c: usize) T {
             return self.data[self.index(r, c)];
+        }
+        pub inline fn getPtr(self: @This(), r: usize, c: usize) *T {
+            return &self.data[self.index(r, c)];
         }
         pub inline fn set(self: @This(), r: usize, c: usize, value: T) void {
             self.data[self.index(r, c)] = value;
@@ -341,6 +416,16 @@ pub fn Matrix(comptime T: type) type {
         pub inline fn from(data: []T, w: usize, h: usize) Matrix(T) {
             std.debug.assert(data.len == w * h);
             return .{ .data = data, ._width = w, ._height = h };
+        }
+
+        pub inline fn view(self: @This(), viewWidth: usize, viewHeight: usize) Matrix(T) {
+            std.debug.assert(viewWidth * viewHeight <= self.data.len);
+            return .{
+                .data = self.data[0 .. viewWidth * viewHeight],
+                ._width = viewWidth,
+                ._height = viewHeight,
+                .allocator = undefined, // non-owning
+            };
         }
     };
 }
@@ -356,7 +441,7 @@ pub fn MatmulFrog(comptime baseType: type, comptime M1: type, comptime M2: type)
             return self.m1.height();
         }
         pub inline fn get(self: @This(), r: usize, c: usize) baseType {
-            return dot(matRow(self.m1, r), matColumn(self.m2, c));
+            return dot(matRow(self.m1, r), matCol(self.m2, c));
         }
     };
 }

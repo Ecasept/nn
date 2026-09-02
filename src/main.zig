@@ -1,8 +1,10 @@
 const std = @import("std");
 const neural = @import("lib/lib.zig");
+const net = @import("lib/network.zig");
 const dataLoader = @import("data.zig");
+const act = @import("lib/activation.zig");
 
-const EPOCHS = 10;
+const EPOCHS = 20;
 const PROGRESS_COUNT = EPOCHS;
 
 pub fn main(init: std.process.Init) void {
@@ -15,9 +17,22 @@ pub fn main(init: std.process.Init) void {
 }
 
 pub fn train(allocator: std.mem.Allocator, io: std.Io) !void {
-    const layers = [_]usize{ dataLoader.MNIST_SIZE, 32, 10 };
+    const layers = [_]net.Layer{
+        .{
+            .size = dataLoader.MNIST_SIZE,
+            .activation = act.Activations().sigmoid(),
+        },
+        .{
+            .size = 32,
+            .activation = act.Activations().sigmoid(),
+        },
+        .{
+            .size = 10,
+            .activation = act.Activations().sigmoid(),
+        },
+    };
     const dl = dataLoader.getDataLoader();
-    var networkRunner = try neural.NetworkRunner.init(allocator, io, "mnist_train.csv", &layers, dl);
+    var networkRunner = try neural.NetworkRunner.init(allocator, io, "assets/mnist_train.csv", &layers, dl);
     defer networkRunner.deinit();
 
     std.debug.print("Training...\n", .{});
@@ -39,7 +54,6 @@ pub fn train(allocator: std.mem.Allocator, io: std.Io) !void {
             std.debug.print("ETA: {}s ({}s/epoch)\n", .{ msPerEpoch * @as(f32, @floatFromInt(EPOCHS - epoch)) / 1000.0, msPerEpoch / 1000.0 });
         }
     }
-    try networkRunner.switchDataset(io, "mnist_test.csv");
+    try networkRunner.switchDataset(io, "assets/mnist_test.csv");
     std.debug.print("Test performance: {d}%\n", .{networkRunner.testEpoch() * 100});
-    networkRunner.deinit();
 }
