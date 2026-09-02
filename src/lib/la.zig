@@ -344,6 +344,9 @@ pub fn copy(noalias src: []const f32, noalias dst: []f32) void {
 pub fn Matrix(comptime T: type) type {
     return GeneralMatrix([]T, T, true);
 }
+pub fn ConstMatrix(comptime T: type) type {
+    return GeneralMatrix([]const T, T, false);
+}
 pub fn GeneralMatrix(comptime Slice: type, comptime T: type, comptime mutable: bool) type {
     return struct {
         data: Slice,
@@ -398,7 +401,7 @@ pub fn GeneralMatrix(comptime Slice: type, comptime T: type, comptime mutable: b
             return .{ .data = data, ._width = w, ._height = h, .allocator = undefined };
         }
 
-        pub inline fn view(self: @This(), viewWidth: usize, viewHeight: usize) GeneralMatrix(Slice, T, false) {
+        pub inline fn view(self: @This(), viewWidth: usize, viewHeight: usize) @This() {
             std.debug.assert(viewWidth * viewHeight <= self.data.len);
             return .{
                 .data = self.data[0 .. viewWidth * viewHeight],

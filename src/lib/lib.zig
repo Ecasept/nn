@@ -131,7 +131,7 @@ pub const NetworkRunner = struct {
             }
 
             self.network.computeActivations(inputs, activations);
-            const err = self.network.calculateError(activations, labels);
+            const err = self.network.calculateMSE(activations, labels);
             accCost += err * @as(f32, @floatFromInt(currentBatchSize));
             self.network.calculateGradients(activations, self.gradients, labels, costDerivatives, currentBatchSize);
             self.network.applyBackPropagation(self.gradients);

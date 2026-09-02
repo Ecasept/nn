@@ -65,28 +65,26 @@ pub const Network = struct {
     fn pow2_f32(x: f32) f32 {
         return std.math.pow(f32, x, 2);
     }
-    pub fn calculateError(self: Network, activations: layout.BatchedNeuronLayout(false), correctOutputs: la.Matrix(f32)) f32 {
+    pub fn calculateMSE(self: Network, activations: layout.BatchedNeuronLayout(false), correctOutputs: la.Matrix(f32)) f32 {
         const modelOutputs = activations.getLayer(self.layerCount - 1);
         const batchSize = modelOutputs.height();
-        const inverseBatchSize = 1.0 / @as(f32, @floatFromInt(batchSize));
         const neuronCount = modelOutputs.width();
+        const inverse = 1.0 / @as(f32, @floatFromInt(batchSize * neuronCount));
         var err: f32 = 0;
-        if (neuronCount == 1) {
-            // Skip squaring and square rooting for a single neuron
-            return inverseBatchSize * la.sum(la.map(la.sub(modelOutputs.getColumnFrog(0), correctOutputs.getColumnFrog(0)), pow2_f32));
-        } else {
-            for (0..batchSize) |batchIdx| {
-                err += std.math.sqrt(la.sum(la.map(la.sub(modelOutputs.getRowFrog(batchIdx), correctOutputs.getRowFrog(batchIdx)), pow2_f32)));
-            }
-            return inverseBatchSize * err;
+        for (0..batchSize) |batchIdx| {
+            err += la.sum(la.map(la.sub(modelOutputs.getRowFrog(batchIdx), correctOutputs.getRowFrog(batchIdx)), pow2_f32));
         }
+        return inverse * err;
     }
     fn mul2(x: f32) f32 {
         return 2 * x;
     }
-    pub fn calculateErrorDerivative(self: Network, activations: layout.BatchedNeuronLayout(false), correctOutput: la.Matrix(f32), deriv: la.Matrix(f32)) void {
+    pub fn calculateMSEDerivative(self: Network, activations: layout.BatchedNeuronLayout(false), correctOutput: la.Matrix(f32), deriv: la.Matrix(f32)) void {
+        const batchSize = correctOutput.height();
+        const neuronCount = correctOutput.width();
+        const inverse = 1.0 / @as(f32, @floatFromInt(batchSize * neuronCount));
         const modelOutput = activations.getLayer(self.layerCount - 1);
-        la.storeMat(la.mapMat(la.subMat(modelOutput, correctOutput), mul2), deriv);
+        la.storeMat(la.scale(la.mapMat(la.subMat(modelOutput, correctOutput), mul2), inverse), deriv);
     }
     pub fn computeActivations(self: Network, inputs: la.Matrix(f32), activations: layout.BatchedNeuronLayout(false)) void {
         // copy inputs to the activations of the first layer
@@ -117,7 +115,7 @@ pub const Network = struct {
         // bias derivative:      1 * <o'(z) * w> * <o'(z) * w> * ... * <o'(z)> * cost deriv
         // which is the same as delta
 
-        self.calculateErrorDerivative(activations, correctOutput, costDerivatives);
+        self.calculateMSEDerivative(activations, correctOutput, costDerivatives);
         var layerIdx = self.layerCount - 1;
 
         var currentDelta = self.scratchA;

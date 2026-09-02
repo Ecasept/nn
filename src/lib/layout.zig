@@ -22,7 +22,7 @@ pub fn BatchedNeuronLayout(skipFirst: bool) type {
         pub fn getLayer(self: @This(), layerIdx: usize) la.Matrix(f32) {
             return self.data[layerIdx - offset];
         }
-        pub fn init(allocator: std.mem.Allocator, layers: []const net.Layer, batchSize: usize) !BatchedNeuronLayout(skipFirst) {
+        pub fn init(allocator: std.mem.Allocator, layers: []const net.Layer, batchSize: usize) !@This() {
             var layout: @This() = .{ .allocator = allocator, .data = undefined };
             layout.data = try allocator.alloc(la.Matrix(f32), layers.len - offset);
             for (offset..layers.len) |i| {
@@ -31,7 +31,7 @@ pub fn BatchedNeuronLayout(skipFirst: bool) type {
             }
             return layout;
         }
-        pub fn deinit(self: BatchedNeuronLayout(skipFirst)) void {
+        pub fn deinit(self: @This()) void {
             for (self.data) |mat| {
                 mat.deinit();
             }
