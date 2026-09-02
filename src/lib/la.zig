@@ -279,7 +279,7 @@ pub fn BroadcastRowFrog(comptime baseType: type, comptime F: type) type {
             return self.f.len();
         }
         pub inline fn height(self: @This()) usize {
-            return self.height;
+            return self._height;
         }
         pub inline fn get(self: @This(), _: usize, column: usize) baseType {
             return self.f.get(column);
@@ -342,8 +342,11 @@ pub fn copy(noalias src: []const f32, noalias dst: []f32) void {
 }
 
 pub fn Matrix(comptime T: type) type {
+    return GeneralMatrix([]T, T, true);
+}
+pub fn GeneralMatrix(comptime Slice: type, comptime T: type, comptime mutable: bool) type {
     return struct {
-        data: []T,
+        data: Slice,
         _width: usize,
         _height: usize,
         allocator: std.mem.Allocator,
@@ -365,13 +368,13 @@ pub fn Matrix(comptime T: type) type {
         inline fn index(self: @This(), r: usize, c: usize) usize {
             return r * self._width + c;
         }
-        pub inline fn getRow(self: @This(), r: usize) []T {
+        pub inline fn getRow(self: @This(), r: usize) Slice {
             return self.data[self.index(r, 0)..self.index(r + 1, 0)];
         }
-        pub inline fn getColumnFrog(self: @This(), c: usize) ColumnFrog(f32, Matrix(T)) {
+        pub inline fn getColumnFrog(self: @This(), c: usize) ColumnFrog(f32, @This()) {
             return .{ .f = self, .column = c };
         }
-        pub inline fn getRowFrog(self: @This(), r: usize) RowFrog(f32, Matrix(T)) {
+        pub inline fn getRowFrog(self: @This(), r: usize) RowFrog(f32, @This()) {
             return .{ .f = self, .row = r };
         }
         pub inline fn get(self: @This(), r: usize, c: usize) T {
@@ -381,17 +384,21 @@ pub fn Matrix(comptime T: type) type {
             return &self.data[self.index(r, c)];
         }
         pub inline fn set(self: @This(), r: usize, c: usize, value: T) void {
-            self.data[self.index(r, c)] = value;
+            if (mutable) {
+                self.data[self.index(r, c)] = value;
+            } else {
+                @compileError("Matrix is not mutable");
+            }
         }
         pub inline fn as1DFrog(self: @This()) SliceFrog(T) {
             return .{ .data = self.data };
         }
-        pub inline fn from(data: []T, w: usize, h: usize) Matrix(T) {
+        pub inline fn from(data: Slice, w: usize, h: usize) @This() {
             std.debug.assert(data.len == w * h);
-            return .{ .data = data, ._width = w, ._height = h };
+            return .{ .data = data, ._width = w, ._height = h, .allocator = undefined };
         }
 
-        pub inline fn view(self: @This(), viewWidth: usize, viewHeight: usize) Matrix(T) {
+        pub inline fn view(self: @This(), viewWidth: usize, viewHeight: usize) GeneralMatrix(Slice, T, false) {
             std.debug.assert(viewWidth * viewHeight <= self.data.len);
             return .{
                 .data = self.data[0 .. viewWidth * viewHeight],
@@ -422,4 +429,239 @@ pub fn MatmulFrog(comptime baseType: type, comptime M1: type, comptime M2: type)
 pub fn matmul(m1: anytype, m2: anytype) MatmulFrog(f32, @TypeOf(m1), @TypeOf(m2)) {
     std.debug.assert(m1.width() == m2.height());
     return .{ .m1 = m1, .m2 = m2 };
+}
+
+test "elementwise vector addition" {
+    const a: [3]f32 = .{ 1, 2, 3 };
+    const b: [3]f32 = .{ 4, 5, 6 };
+    var c: [3]f32 = .{ undefined, undefined, undefined };
+    store(add(from(&a), from(&b)), &c);
+    std.debug.assert(c[0] == 5);
+    std.debug.assert(c[1] == 7);
+    std.debug.assert(c[2] == 9);
+}
+
+test "elementwise vector multiplication" {
+    const a: [3]f32 = .{ 1, 2, 3 };
+    const b: [3]f32 = .{ 4, 5, 6 };
+    var c: [3]f32 = .{ undefined, undefined, undefined };
+    store(mul(from(&a), from(&b)), &c);
+    std.debug.assert(c[0] == 4);
+    std.debug.assert(c[1] == 10);
+    std.debug.assert(c[2] == 18);
+}
+
+test "elementwise vector subtraction" {
+    const a: [3]f32 = .{ 1, 2, 3 };
+    const b: [3]f32 = .{ 4, 5, 6 };
+    var c: [3]f32 = .{ undefined, undefined, undefined };
+    store(sub(from(&a), from(&b)), &c);
+    std.debug.assert(c[0] == -3);
+    std.debug.assert(c[1] == -3);
+    std.debug.assert(c[2] == -3);
+}
+
+fn TestMat(comptime rows: usize, comptime cols: usize) type {
+    return struct {
+        data: [rows * cols]f32,
+        const Self = @This();
+
+        fn init(input: [rows][cols]f32) Self {
+            var self: Self = undefined;
+            for (input, 0..) |row, i| {
+                for (row, 0..) |val, j| {
+                    self.data[i * cols + j] = val;
+                }
+            }
+            return self;
+        }
+        fn undef() Self {
+            const self: Self = undefined;
+            return self;
+        }
+
+        fn matrix(self: *const Self) GeneralMatrix([]const f32, f32, false) {
+            return GeneralMatrix([]const f32, f32, false).from(&self.data, cols, rows);
+        }
+        fn matrixMut(self: *Self) Matrix(f32) {
+            return Matrix(f32).from(&self.data, cols, rows);
+        }
+    };
+}
+
+const TestOps = struct {
+    fn square(value: f32) f32 {
+        return value * value;
+    }
+
+    fn offset(value: f32) f32 {
+        return value + 0.5;
+    }
+
+    fn sequence(index: usize) f32 {
+        return @floatFromInt(index * 2 + 1);
+    }
+};
+
+test "map" {
+    const input = [_]f32{ -2, 0, 3 };
+    var output: [input.len]f32 = undefined;
+
+    const mapped = map(from(&input), TestOps.square);
+    try std.testing.expectEqual(input.len, mapped.len());
+    store(mapped, &output);
+    try std.testing.expectEqualSlices(f32, &.{ 4, 0, 9 }, &output);
+}
+
+test "mapRuntime" {
+    const input = [_]f32{ -2, 0, 3 };
+    var output: [input.len]f32 = undefined;
+    const operation: *const fn (f32) f32 = TestOps.offset;
+
+    const mapped = mapRuntime(from(&input), operation);
+    try std.testing.expectEqual(input.len, mapped.len());
+    store(mapped, &output);
+    try std.testing.expectEqualSlices(f32, &.{ -1.5, 0.5, 3.5 }, &output);
+}
+
+test "mapMat" {
+    const backing = TestMat(2, 3).init(.{ .{ -2, 0, 3 }, .{ 4, -5, 1 } });
+    const mapped = mapMat(backing.matrix(), TestOps.square);
+
+    try std.testing.expectEqual(@as(usize, 3), mapped.width());
+    try std.testing.expectEqual(@as(usize, 2), mapped.height());
+    try std.testing.expectEqual(@as(f32, 4), mapped.get(0, 0));
+    try std.testing.expectEqual(@as(f32, 0), mapped.get(0, 1));
+    try std.testing.expectEqual(@as(f32, 9), mapped.get(0, 2));
+    try std.testing.expectEqual(@as(f32, 25), mapped.get(1, 1));
+}
+
+test "mapMatRuntime" {
+    const backing = TestMat(2, 2).init(.{ .{ -2, 0 }, .{ 3, 4 } });
+    const operation: *const fn (f32) f32 = TestOps.offset;
+    const mapped = mapMatRuntime(backing.matrix(), operation);
+
+    try std.testing.expectEqual(@as(usize, 2), mapped.width());
+    try std.testing.expectEqual(@as(usize, 2), mapped.height());
+    try std.testing.expectEqual(@as(f32, -1.5), mapped.get(0, 0));
+    try std.testing.expectEqual(@as(f32, 0.5), mapped.get(0, 1));
+    try std.testing.expectEqual(@as(f32, 3.5), mapped.get(1, 0));
+    try std.testing.expectEqual(@as(f32, 4.5), mapped.get(1, 1));
+}
+
+test "scale" {
+    const backing = TestMat(2, 2).init(.{ .{ 1, -2 }, .{ 0.5, 4 } });
+    const scaled = scale(backing.matrix(), -2);
+
+    try std.testing.expectEqual(@as(usize, 2), scaled.width());
+    try std.testing.expectEqual(@as(usize, 2), scaled.height());
+    try std.testing.expectEqual(@as(f32, -2), scaled.get(0, 0));
+    try std.testing.expectEqual(@as(f32, 4), scaled.get(0, 1));
+    try std.testing.expectEqual(@as(f32, -1), scaled.get(1, 0));
+    try std.testing.expectEqual(@as(f32, -8), scaled.get(1, 1));
+}
+
+test "transpose" {
+    const backing = TestMat(2, 3).init(.{ .{ 1, 2, 3 }, .{ 4, 5, 6 } });
+    const transposed = transpose(backing.matrix());
+
+    try std.testing.expectEqual(@as(usize, 2), transposed.width());
+    try std.testing.expectEqual(@as(usize, 3), transposed.height());
+    try std.testing.expectEqual(@as(f32, 1), transposed.get(0, 0));
+    try std.testing.expectEqual(@as(f32, 4), transposed.get(0, 1));
+    try std.testing.expectEqual(@as(f32, 3), transposed.get(2, 0));
+    try std.testing.expectEqual(@as(f32, 6), transposed.get(2, 1));
+}
+
+test "generate" {
+    const generated = generate(TestOps.sequence, 4);
+
+    try std.testing.expectEqual(@as(usize, 4), generated.len());
+    try std.testing.expectEqual(@as(f32, 1), generated.get(0));
+    try std.testing.expectEqual(@as(f32, 3), generated.get(1));
+    try std.testing.expectEqual(@as(f32, 7), generated.get(3));
+}
+
+test "broadcastRows" {
+    const row = [_]f32{ 2, -1, 4 };
+    const broadcast = broadcastRows(from(&row), 3);
+
+    try std.testing.expectEqual(@as(usize, 3), broadcast.width());
+    try std.testing.expectEqual(@as(usize, 3), broadcast.height());
+    for (0..broadcast.height()) |r| {
+        for (row, 0..) |expected, c| {
+            try std.testing.expectEqual(expected, broadcast.get(r, c));
+        }
+    }
+}
+
+test "dot" {
+    const a = [_]f32{ 1, -2, 3 };
+    const b = [_]f32{ 4, 5, -1 };
+
+    try std.testing.expectEqual(@as(f32, -9), dot(from(&a), from(&b)));
+}
+
+test "sum" {
+    const values = [_]f32{ 1.5, -2, 4, -0.5 };
+
+    try std.testing.expectEqual(@as(f32, 3), sum(from(&values)));
+}
+
+test "matmul" {
+    const left_backing = TestMat(2, 3).init(.{ .{ 1, 2, 3 }, .{ 4, 5, 6 } });
+    const right_backing = TestMat(3, 2).init(.{ .{ 7, 8 }, .{ 9, 10 }, .{ 11, 12 } });
+    const product = matmul(left_backing.matrix(), right_backing.matrix());
+
+    try std.testing.expectEqual(@as(usize, 2), product.width());
+    try std.testing.expectEqual(@as(usize, 2), product.height());
+    try std.testing.expectEqual(@as(f32, 58), product.get(0, 0));
+    try std.testing.expectEqual(@as(f32, 64), product.get(0, 1));
+    try std.testing.expectEqual(@as(f32, 139), product.get(1, 0));
+    try std.testing.expectEqual(@as(f32, 154), product.get(1, 1));
+}
+
+test "elementwise matrix addition" {
+    const a = TestMat(2, 3).init(.{ .{ 1, 2, 3 }, .{ 4, 5, 6 } }).matrix();
+    const b = TestMat(2, 3).init(.{ .{ 7, 8, 9 }, .{ 10, 11, 12 } }).matrix();
+    var _c = TestMat(2, 3).undef();
+    var c = _c.matrixMut();
+
+    storeMat(addMat(a, b), c);
+    std.debug.assert(c.get(0, 0) == 8);
+    std.debug.assert(c.get(0, 1) == 10);
+    std.debug.assert(c.get(0, 2) == 12);
+    std.debug.assert(c.get(1, 0) == 14);
+    std.debug.assert(c.get(1, 1) == 16);
+    std.debug.assert(c.get(1, 2) == 18);
+}
+
+test "elementwise matrix multiplication" {
+    const a = TestMat(2, 3).init(.{ .{ 1, 2, 3 }, .{ 4, 5, 6 } }).matrix();
+    const b = TestMat(2, 3).init(.{ .{ 7, 8, 9 }, .{ 10, 11, 12 } }).matrix();
+    var _c = TestMat(2, 3).undef();
+    var c = _c.matrixMut();
+
+    storeMat(mulMat(a, b), c);
+    std.debug.assert(c.get(0, 0) == 7);
+    std.debug.assert(c.get(0, 1) == 16);
+    std.debug.assert(c.get(0, 2) == 27);
+    std.debug.assert(c.get(1, 0) == 40);
+    std.debug.assert(c.get(1, 1) == 55);
+    std.debug.assert(c.get(1, 2) == 72);
+}
+
+test "elementwise matrix subtraction" {
+    const a = TestMat(2, 3).init(.{ .{ 1, 2, 3 }, .{ 4, 5, 6 } }).matrix();
+    const b = TestMat(2, 3).init(.{ .{ 7, 8, 9 }, .{ 10, 11, 12 } }).matrix();
+    var _c = TestMat(2, 3).undef();
+    var c = _c.matrixMut();
+
+    storeMat(subMat(a, b), c);
+    std.debug.assert(c.get(0, 0) == -6);
+    std.debug.assert(c.get(0, 1) == -6);
+    std.debug.assert(c.get(0, 2) == -6);
+    std.debug.assert(c.get(1, 0) == -6);
+    std.debug.assert(c.get(1, 1) == -6);
+    std.debug.assert(c.get(1, 2) == -6);
 }
