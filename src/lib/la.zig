@@ -2,33 +2,6 @@ const std = @import("std");
 
 // idk if i should call this streams iterators sequences generators etc so ill just call it frog
 
-test "frogs are zero-cost abstraction" {
-    const al = std.testing.allocator;
-
-    var prng = std.Random.DefaultPrng.init(67);
-    const rand = prng.random();
-    const len = rand.int(usize) % 50;
-
-    const a = try al.alloc(f32, len);
-    const b = try al.alloc(f32, len);
-    const c = try al.alloc(f32, len);
-    defer al.free(a);
-    defer al.free(b);
-    defer al.free(c);
-
-    for (0..len) |i| {
-        a[i] = rand.float(f32);
-        b[i] = rand.float(f32);
-        c[i] = rand.float(f32);
-    }
-
-    const res = sum(add(from(a), add(from(b), from(c))));
-    std.debug.print("{d}\n", .{res});
-
-    // Examples
-    // matmul(m1, matmul(m2, m3))
-}
-
 pub fn SliceFrog(comptime baseType: type) type {
     return struct {
         data: []const baseType,
@@ -348,8 +321,8 @@ pub fn store(data: anytype, out: []f32) void {
 
 pub fn storeMat(data: anytype, out: anytype) void {
     std.debug.assert(out.height() == data.height());
+    std.debug.assert(out.width() == data.width());
     for (0..data.height()) |r| {
-        std.debug.assert(out.width() == data.width());
         for (0..data.width()) |c| {
             out.set(r, c, data.get(r, c));
         }
