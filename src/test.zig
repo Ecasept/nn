@@ -94,6 +94,72 @@ test "numerical gradient check" {
     try numericalGradientCheck(allocator, &layers, inputsMatrix, labelsMatrix, BATCH_SIZE, EPSILON, ABSOLUTE_ERROR_THRESHOLD, RELATIVE_ERROR_THRESHOLD);
 }
 
+test "learns XOR" {
+    const inputsData = [_][2]f32{
+        .{ 0, 0 },
+        .{ 0, 1 },
+        .{ 1, 0 },
+        .{ 1, 1 },
+    };
+    const labelsData = [_][1]f32{
+        .{0},
+        .{1},
+        .{1},
+        .{0},
+    };
+    const inputs = la.TestMat(4, 2).init(inputsData).matrix();
+    const labels = la.TestMat(4, 1).init(labelsData).matrix();
+    const layers = [_]net.Layer{
+        .{ .size = 2, .activation = act.Activations().sigmoid() },
+        .{ .size = 4, .activation = act.Activations().sigmoid() },
+        .{ .size = 1, .activation = act.Activations().sigmoid() },
+    };
+
+    const allocator = std.testing.allocator;
+    var network = try net.Network.init(allocator, &layers, inputsData.len);
+    const activations = try network.initActivations(inputsData.len);
+    const gradients = try network.initGradients();
+    const costDerivatives = try network.initCostDerivatives(inputsData.len);
+    defer network.deinit();
+    defer activations.deinit();
+    defer gradients.deinit();
+    defer costDerivatives.deinit();
+
+    const hiddenWeights = [_][2]f32{
+        .{ 0.5, -0.4 },
+        .{ -0.3, 0.2 },
+        .{ 0.1, 0.6 },
+        .{ -0.7, -0.2 },
+    };
+    const hiddenBiases = [_]f32{ 0.1, -0.2, 0.05, 0.3 };
+    const outputWeights = [_]f32{ 0.4, -0.5, 0.3, 0.2 };
+    for (hiddenWeights, 0..) |weights, neuronIdx| {
+        for (weights, 0..) |weight, inputIdx| {
+            network.weights.getWeight(1, neuronIdx, inputIdx).* = weight;
+        }
+        network.biases.getNeuron(1, neuronIdx).* = hiddenBiases[neuronIdx];
+        network.weights.getWeight(2, 0, neuronIdx).* = outputWeights[neuronIdx];
+    }
+    network.biases.getNeuron(2, 0).* = -0.1;
+    network.learningRate = 1.0;
+
+    network.computeActivations(inputs, activations);
+    const initialLoss = network.calculateMSE(activations, labels);
+    for (0..2_000) |_| {
+        network.calculateGradients(activations, gradients, labels, costDerivatives, inputsData.len);
+        network.applyBackPropagation(gradients);
+        network.computeActivations(inputs, activations);
+    }
+    const finalLoss = network.calculateMSE(activations, labels);
+
+    try std.testing.expect(finalLoss < initialLoss * 0.1);
+    const output = activations.getLayer(layers.len - 1);
+    for (labelsData, 0..) |expected, sampleIdx| {
+        const prediction: f32 = if (output.get(sampleIdx, 0) >= 0.5) 1 else 0;
+        try std.testing.expectEqual(expected[0], prediction);
+    }
+}
+
 fn numericalGradientCheck(allocator: std.mem.Allocator, layers: []const net.Layer, inputs: la.ConstMatrix(f32), labels: la.ConstMatrix(f32), BATCH_SIZE: usize, EPSILON: f32, ABSOLUTE_ERROR_THRESHOLD: f32, RELATIVE_ERROR_THRESHOLD: f32) !void {
     var network = try net.Network.init(allocator, layers, BATCH_SIZE);
     const activations = try network.initActivations(BATCH_SIZE);
