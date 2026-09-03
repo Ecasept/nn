@@ -19,13 +19,7 @@ test "explicit forward pass" {
         .{ .size = 2, .activation = act.Activations().relu() },
     };
 
-    var runner = try nn.NetworkRunner.init(
-        allocator,
-        io,
-        "",
-        &layers,
-        dl.EMPTY_DATA_LOADER,
-    );
+    var runner = try nn.NetworkRunner.init(allocator, io, "", &layers, dl.EMPTY_DATA_LOADER, 1);
 
     // Weights going to first neuron of second layer
     runner.network.weights.getWeight(1, 0, 0).* = 0.5;
@@ -67,4 +61,99 @@ test "explicit forward pass" {
     try std.testing.expectEqual(@as(f32, 0.5), output[1]);
 
     runner.deinit();
+}
+
+test "numerical gradient check" {
+    const inputs = [_][2]f32{
+        .{ 1.0, 2.0 },
+        .{ 3.0, 4.0 },
+        .{ 5.0, 6.0 },
+    };
+    const labels = [_][10]f32{
+        .{ 0, 1, 0, 1, 0, 1, 0, 1, 0, 1 },
+        .{ 1, 0, 1, 0, 1, 0, 1, 0, 1, 0 },
+        .{ 0, 1, 0, 1, 0, 1, 0, 1, 0, 1 },
+    };
+
+    const inputsMatrix = la.TestMat(3, 2).init(inputs).matrix();
+    const labelsMatrix = la.TestMat(3, 10).init(labels).matrix();
+
+    const allocator = std.testing.allocator;
+
+    const layers = [_]net.Layer{
+        .{ .size = 2, .activation = act.Activations().relu() },
+        .{ .size = 20, .activation = act.Activations().sigmoid() },
+        .{ .size = 30, .activation = act.Activations().relu() },
+        .{ .size = 20, .activation = act.Activations().sigmoid() },
+        .{ .size = 10, .activation = act.Activations().relu() },
+    };
+    const BATCH_SIZE = inputs.len;
+    const EPSILON = 0.001;
+    const ABSOLUTE_ERROR_THRESHOLD = 0.0001;
+    const RELATIVE_ERROR_THRESHOLD = 0.01;
+    try numericalGradientCheck(allocator, &layers, inputsMatrix, labelsMatrix, BATCH_SIZE, EPSILON, ABSOLUTE_ERROR_THRESHOLD, RELATIVE_ERROR_THRESHOLD);
+}
+
+fn numericalGradientCheck(allocator: std.mem.Allocator, layers: []const net.Layer, inputs: la.ConstMatrix(f32), labels: la.ConstMatrix(f32), BATCH_SIZE: usize, EPSILON: f32, ABSOLUTE_ERROR_THRESHOLD: f32, RELATIVE_ERROR_THRESHOLD: f32) !void {
+    var network = try net.Network.init(allocator, layers, BATCH_SIZE);
+    const activations = try network.initActivations(BATCH_SIZE);
+    const normalGradients = try network.initGradients();
+    const costDerivatives = try network.initCostDerivatives(BATCH_SIZE);
+    defer network.deinit();
+    defer activations.deinit();
+    defer normalGradients.deinit();
+    defer costDerivatives.deinit();
+
+    network.computeActivations(inputs, activations);
+    network.calculateGradients(activations, normalGradients, labels, costDerivatives, BATCH_SIZE);
+
+    for (1..network.layerCount) |layerIdx| {
+        for (0..network.layers[layerIdx].size) |neuronIdx| {
+            for (0..network.layers[layerIdx - 1].size) |connectedNeuronIdx| {
+                const weightPtr = network.weights.getWeight(layerIdx, neuronIdx, connectedNeuronIdx);
+                const originalWeight = weightPtr.*;
+
+                weightPtr.* = originalWeight - EPSILON;
+                network.computeActivations(inputs, activations);
+                const minusCost = network.calculateMSE(activations, labels);
+
+                weightPtr.* = originalWeight + EPSILON;
+                network.computeActivations(inputs, activations);
+                const plusCost = network.calculateMSE(activations, labels);
+
+                const backpropGradient = normalGradients.weights.getWeight(layerIdx, neuronIdx, connectedNeuronIdx).*;
+                const numericalGradient = (plusCost - minusCost) / (2 * EPSILON);
+                const diff = @abs(numericalGradient - backpropGradient);
+                const magnitude = @abs(numericalGradient) + @abs(backpropGradient);
+                const relativeError = if (magnitude == 0.0) 0.0 else diff / magnitude;
+                try std.testing.expect(diff < ABSOLUTE_ERROR_THRESHOLD or relativeError < RELATIVE_ERROR_THRESHOLD);
+
+                weightPtr.* = originalWeight;
+            }
+        }
+    }
+    for (1..network.layerCount) |layerIdx| {
+        for (0..network.layers[layerIdx].size) |neuronIdx| {
+            const biasPtr = network.biases.getNeuron(layerIdx, neuronIdx);
+            const originalBias = biasPtr.*;
+
+            biasPtr.* = originalBias - EPSILON;
+            network.computeActivations(inputs, activations);
+            const minusCost = network.calculateMSE(activations, labels);
+
+            biasPtr.* = originalBias + EPSILON;
+            network.computeActivations(inputs, activations);
+            const plusCost = network.calculateMSE(activations, labels);
+
+            const backpropGradient = normalGradients.biases.getNeuron(layerIdx, neuronIdx).*;
+            const numericalGradient = (plusCost - minusCost) / (2 * EPSILON);
+            const diff = @abs(numericalGradient - backpropGradient);
+            const magnitude = @abs(numericalGradient) + @abs(backpropGradient);
+            const relativeError = if (magnitude == 0.0) 0.0 else diff / magnitude;
+
+            try std.testing.expect(diff < ABSOLUTE_ERROR_THRESHOLD or relativeError < RELATIVE_ERROR_THRESHOLD);
+
+            biasPtr.* = originalBias;
+        }
+    }
 }

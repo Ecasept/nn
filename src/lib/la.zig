@@ -410,6 +410,15 @@ pub fn GeneralMatrix(comptime Slice: type, comptime T: type, comptime mutable: b
                 .allocator = undefined, // non-owning
             };
         }
+        pub inline fn constView(self: @This(), viewWidth: usize, viewHeight: usize) ConstMatrix(T) {
+            std.debug.assert(viewWidth * viewHeight <= self.data.len);
+            return .{
+                .data = self.data[0 .. viewWidth * viewHeight],
+                ._width = viewWidth,
+                ._height = viewHeight,
+                .allocator = undefined, // non-owning
+            };
+        }
     };
 }
 
@@ -464,12 +473,12 @@ test "elementwise vector subtraction" {
     std.debug.assert(c[2] == -3);
 }
 
-fn TestMat(comptime rows: usize, comptime cols: usize) type {
+pub fn TestMat(comptime rows: usize, comptime cols: usize) type {
     return struct {
         data: [rows * cols]f32,
         const Self = @This();
 
-        fn init(input: [rows][cols]f32) Self {
+        pub fn init(input: [rows][cols]f32) Self {
             var self: Self = undefined;
             for (input, 0..) |row, i| {
                 for (row, 0..) |val, j| {
@@ -478,15 +487,15 @@ fn TestMat(comptime rows: usize, comptime cols: usize) type {
             }
             return self;
         }
-        fn undef() Self {
+        pub fn undef() Self {
             const self: Self = undefined;
             return self;
         }
 
-        fn matrix(self: *const Self) GeneralMatrix([]const f32, f32, false) {
-            return GeneralMatrix([]const f32, f32, false).from(&self.data, cols, rows);
+        pub fn matrix(self: *const Self) ConstMatrix(f32) {
+            return ConstMatrix(f32).from(&self.data, cols, rows);
         }
-        fn matrixMut(self: *Self) Matrix(f32) {
+        pub fn matrixMut(self: *Self) Matrix(f32) {
             return Matrix(f32).from(&self.data, cols, rows);
         }
     };

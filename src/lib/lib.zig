@@ -46,8 +46,6 @@ pub fn maxIndex(comptime T: type, slice: []T, lowest: T) usize {
     return maxIdx;
 }
 
-const BATCH_SIZE = 32;
-
 pub const NetworkRunner = struct {
     layers: []const network.Layer,
     network: network.Network,
@@ -61,20 +59,20 @@ pub const NetworkRunner = struct {
     dataLoader: dl.DataLoader,
     batchSize: usize,
 
-    pub fn init(allocator: std.mem.Allocator, io: std.Io, filename: []const u8, layers: []const network.Layer, dataLoader: dl.DataLoader) !NetworkRunner {
-        const n = try network.Network.init(allocator, layers, BATCH_SIZE);
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, filename: []const u8, layers: []const network.Layer, dataLoader: dl.DataLoader, batchSize: usize) !NetworkRunner {
+        const n = try network.Network.init(allocator, layers, batchSize);
         return NetworkRunner{
             .allocator = allocator,
             .layers = layers,
             .network = n,
-            .activations = try n.initActivations(BATCH_SIZE),
+            .activations = try n.initActivations(batchSize),
             .gradients = try n.initGradients(),
-            .batchInputs = try la.Matrix(f32).init(allocator, layers[0].size, BATCH_SIZE),
-            .batchLabels = try la.Matrix(f32).init(allocator, layers[layers.len - 1].size, BATCH_SIZE),
-            .costDerivatives = try la.Matrix(f32).init(allocator, layers[layers.len - 1].size, BATCH_SIZE),
+            .batchInputs = try la.Matrix(f32).init(allocator, layers[0].size, batchSize),
+            .batchLabels = try la.Matrix(f32).init(allocator, layers[layers.len - 1].size, batchSize),
+            .costDerivatives = try n.initCostDerivatives(batchSize),
             .trainingData = try dataLoader.loadData(allocator, io, filename),
             .dataLoader = dataLoader,
-            .batchSize = BATCH_SIZE,
+            .batchSize = batchSize,
         };
     }
     pub fn deinit(self: *NetworkRunner) void {
@@ -118,8 +116,8 @@ pub const NetworkRunner = struct {
             const isLastBatch = currentBatchSize < self.batchSize;
             self.loadBatch(dataPoints);
 
-            const inputs = self.batchInputs.view(self.layers[0].size, currentBatchSize);
-            const labels = self.batchLabels.view(self.layers[self.layers.len - 1].size, currentBatchSize);
+            const inputs = self.batchInputs.constView(self.layers[0].size, currentBatchSize);
+            const labels = self.batchLabels.constView(self.layers[self.layers.len - 1].size, currentBatchSize);
             const costDerivatives = self.costDerivatives.view(self.layers[self.layers.len - 1].size, currentBatchSize);
             var activations: layout.BatchedNeuronLayout(false) = undefined;
             if (isLastBatch) {
@@ -151,7 +149,7 @@ pub const NetworkRunner = struct {
             const isLastBatch = dataPoints.len < self.batchSize;
             self.loadBatch(dataPoints);
 
-            const inputs = self.batchInputs.view(self.layers[0].size, dataPoints.len);
+            const inputs = self.batchInputs.constView(self.layers[0].size, dataPoints.len);
             var activations: layout.BatchedNeuronLayout(false) = undefined;
             if (isLastBatch) {
                 // If the last batch is smaller than the batch size, we need to create a new activation view with the correct size
@@ -180,7 +178,7 @@ pub const NetworkRunner = struct {
     /// Computes the activations for a single input instance (instead of a batch) and returns the activations. The returned activations are a view of the internal activations, so they should not be modified.
     fn computeActivationsSingleInstance(self: NetworkRunner, input: []const f32) layout.BatchedNeuronLayout(false) {
         @memcpy(self.batchInputs.getRow(0), input);
-        const inputs = self.batchInputs.view(self.layers[0].size, 1);
+        const inputs = self.batchInputs.constView(self.layers[0].size, 1);
         const activations = self.activationView(1);
         self.network.computeActivations(inputs, activations);
         return activations;

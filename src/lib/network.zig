@@ -56,6 +56,9 @@ pub const Network = struct {
     pub fn initActivations(self: Network, batchSize: usize) !layout.BatchedNeuronLayout(false) {
         return try layout.BatchedNeuronLayout(false).init(self.allocator, self.layers, batchSize);
     }
+    pub fn initCostDerivatives(self: Network, batchSize: usize) !la.Matrix(f32) {
+        return try la.Matrix(f32).init(self.allocator, self.layers[self.layers.len - 1].size, batchSize);
+    }
     pub fn initGradients(self: Network) !Gradients {
         return .{
             .weights = try layout.WeightsLayout.init(self.allocator, self.layers),
@@ -65,7 +68,7 @@ pub const Network = struct {
     fn pow2_f32(x: f32) f32 {
         return std.math.pow(f32, x, 2);
     }
-    pub fn calculateMSE(self: Network, activations: layout.BatchedNeuronLayout(false), correctOutputs: la.Matrix(f32)) f32 {
+    pub fn calculateMSE(self: Network, activations: layout.BatchedNeuronLayout(false), correctOutputs: la.ConstMatrix(f32)) f32 {
         const modelOutputs = activations.getLayer(self.layerCount - 1);
         const batchSize = modelOutputs.height();
         const neuronCount = modelOutputs.width();
@@ -79,14 +82,14 @@ pub const Network = struct {
     fn mul2(x: f32) f32 {
         return 2 * x;
     }
-    pub fn calculateMSEDerivative(self: Network, activations: layout.BatchedNeuronLayout(false), correctOutput: la.Matrix(f32), deriv: la.Matrix(f32)) void {
+    pub fn calculateMSEDerivative(self: Network, activations: layout.BatchedNeuronLayout(false), correctOutput: la.ConstMatrix(f32), deriv: la.Matrix(f32)) void {
         const batchSize = correctOutput.height();
         const neuronCount = correctOutput.width();
         const inverse = 1.0 / @as(f32, @floatFromInt(batchSize * neuronCount));
         const modelOutput = activations.getLayer(self.layerCount - 1);
         la.storeMat(la.scale(la.mapMat(la.subMat(modelOutput, correctOutput), mul2), inverse), deriv);
     }
-    pub fn computeActivations(self: Network, inputs: la.Matrix(f32), activations: layout.BatchedNeuronLayout(false)) void {
+    pub fn computeActivations(self: Network, inputs: la.ConstMatrix(f32), activations: layout.BatchedNeuronLayout(false)) void {
         // copy inputs to the activations of the first layer
         la.storeMat(inputs, activations.getLayer(0));
         for (1..self.layerCount) |layerIdx| {
@@ -104,7 +107,7 @@ pub const Network = struct {
     // Activations: B x N_l
     // Delta: B x N_l
     // Biases: B x N_l
-    pub fn calculateGradients(self: Network, activations: layout.BatchedNeuronLayout(false), gradients: Gradients, correctOutput: la.Matrix(f32), costDerivatives: la.Matrix(f32), batchSize: usize) void {
+    pub fn calculateGradients(self: Network, activations: layout.BatchedNeuronLayout(false), gradients: Gradients, correctOutput: la.ConstMatrix(f32), costDerivatives: la.Matrix(f32), batchSize: usize) void {
         // After a lot of thinking, i arrived at this formula:
         // so for weights:
         //                   dz/dw *    delta    *    delta    * ... *     first delta
@@ -120,8 +123,6 @@ pub const Network = struct {
 
         var currentDelta = self.scratchA;
         var nextDelta = self.scratchB;
-
-        const inverseBatchSize = 1.0 / @as(f32, @floatFromInt(batchSize));
 
         while (layerIdx >= 1) : (layerIdx -= 1) {
             // Where to store our delta
@@ -151,12 +152,12 @@ pub const Network = struct {
 
             // The biases need to be summed
             for (0..deltaOut.width()) |neuron| {
-                gradients.biases.getNeuron(layerIdx, neuron).* = la.sum(deltaOut.getColumnFrog(neuron)) * inverseBatchSize;
+                gradients.biases.getNeuron(layerIdx, neuron).* = la.sum(deltaOut.getColumnFrog(neuron));
             }
 
             // And now for the weighs we just need to multiply by the activations of the previous layer (this sums over the batches at the same time)
             const prevLayerActivations = activations.getLayer(layerIdx - 1);
-            la.storeMat(la.scale(la.matmul(la.transpose(deltaOut), prevLayerActivations), inverseBatchSize), gradients.weights.getLayer(layerIdx));
+            la.storeMat(la.matmul(la.transpose(deltaOut), prevLayerActivations), gradients.weights.getLayer(layerIdx));
 
             // Swap
             const tmp = currentDelta;
