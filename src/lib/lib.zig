@@ -58,6 +58,7 @@ pub const NetworkRunner = struct {
     allocator: std.mem.Allocator,
     dataLoader: dl.DataLoader,
     batchSize: usize,
+    random: std.Random,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, filename: []const u8, layers: []const network.Layer, dataLoader: dl.DataLoader, batchSize: usize, random: std.Random) !NetworkRunner {
         const n = try network.Network.init(allocator, layers, batchSize, random);
@@ -73,6 +74,7 @@ pub const NetworkRunner = struct {
             .trainingData = try dataLoader.loadData(allocator, io, filename),
             .dataLoader = dataLoader,
             .batchSize = batchSize,
+            .random = random,
         };
     }
     pub fn deinit(self: *NetworkRunner) void {
@@ -107,6 +109,9 @@ pub const NetworkRunner = struct {
     }
 
     pub fn trainEpoch(self: NetworkRunner) f32 {
+        // fisher-yates
+        self.random.shuffle(dl.DataPoint, self.trainingData.items);
+
         var accCost: f32 = 0;
         var batch: usize = 0;
         while (batch < self.trainingData.items.len) : (batch += self.batchSize) {
