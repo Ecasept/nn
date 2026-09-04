@@ -1,5 +1,5 @@
 const std = @import("std");
-const dl = @import("lib/data_loader.zig");
+const dl = @import("../lib/data_loader.zig");
 
 pub const MNIST_SIZE = 784;
 

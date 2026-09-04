@@ -1,9 +1,9 @@
 const std = @import("std");
-const neural = @import("lib/lib.zig");
-const net = @import("lib/network.zig");
+const neural = @import("../lib/lib.zig");
+const net = @import("../lib/network.zig");
 const dataLoader = @import("data.zig");
-const dataLoaderTypes = @import("lib/data_loader.zig");
-const act = @import("lib/activation.zig");
+const dataLoaderTypes = @import("../lib/data_loader.zig");
+const act = @import("../lib/activation.zig");
 
 const TrainingConfig = struct {
     layers: []const net.Layer,
@@ -25,7 +25,7 @@ const trainingConfig: TrainingConfig = .{
     .testDataPath = "assets/mnist_test.csv",
     .epochs = 20,
     .batchSize = 32,
-    .learningRate = 0.1,
+    .learningRate = 10,
     .randomSeed = 67,
 };
 
