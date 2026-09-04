@@ -59,8 +59,8 @@ pub const NetworkRunner = struct {
     dataLoader: dl.DataLoader,
     batchSize: usize,
 
-    pub fn init(allocator: std.mem.Allocator, io: std.Io, filename: []const u8, layers: []const network.Layer, dataLoader: dl.DataLoader, batchSize: usize) !NetworkRunner {
-        const n = try network.Network.init(allocator, layers, batchSize);
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, filename: []const u8, layers: []const network.Layer, dataLoader: dl.DataLoader, batchSize: usize, random: std.Random) !NetworkRunner {
+        const n = try network.Network.init(allocator, layers, batchSize, random);
         return NetworkRunner{
             .allocator = allocator,
             .layers = layers,

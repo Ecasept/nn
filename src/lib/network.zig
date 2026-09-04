@@ -27,7 +27,7 @@ pub const Network = struct {
     scratchA: la.Matrix(f32),
     scratchB: la.Matrix(f32),
 
-    pub fn init(allocator: std.mem.Allocator, layers: []const Layer, batchSize: usize) !Network {
+    pub fn init(allocator: std.mem.Allocator, layers: []const Layer, batchSize: usize, random: std.Random) !Network {
         var maxLayerSize: usize = 0;
         for (layers) |layer| {
             if (layer.size > maxLayerSize) {
@@ -40,7 +40,7 @@ pub const Network = struct {
             .layers = layers,
             .allocator = allocator,
             .biases = try layout.NeuronLayout(true).init(allocator, layers),
-            .weights = try layout.WeightsLayout.init(allocator, layers),
+            .weights = try layout.WeightsLayout.init(allocator, layers, random),
             .learningRate = 0.1,
             .scratchA = try la.Matrix(f32).init(allocator, maxLayerSize, batchSize),
             .scratchB = try la.Matrix(f32).init(allocator, maxLayerSize, batchSize),
@@ -61,7 +61,7 @@ pub const Network = struct {
     }
     pub fn initGradients(self: Network) !Gradients {
         return .{
-            .weights = try layout.WeightsLayout.init(self.allocator, self.layers),
+            .weights = try layout.WeightsLayout.initZeroed(self.allocator, self.layers),
             .biases = try layout.NeuronLayout(true).init(self.allocator, self.layers),
         };
     }

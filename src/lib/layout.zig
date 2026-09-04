@@ -2,15 +2,6 @@ const std = @import("std");
 const la = @import("la.zig");
 const net = @import("network.zig");
 
-var prng = std.Random.DefaultPrng.init(67);
-const rand = prng.random();
-
-pub fn randomInit(slice: []f32) void {
-    for (slice) |*el| {
-        el.* = rand.float(f32) - 0.5;
-    }
-}
-
 pub fn BatchedNeuronLayout(skipFirst: bool) type {
     const offset = if (skipFirst) 1 else 0;
     return struct {
@@ -27,7 +18,7 @@ pub fn BatchedNeuronLayout(skipFirst: bool) type {
             layout.data = try allocator.alloc(la.Matrix(f32), layers.len - offset);
             for (offset..layers.len) |i| {
                 layout.data[i - offset] = try la.Matrix(f32).init(allocator, layers[i].size, batchSize);
-                randomInit(layout.data[i - offset].data);
+                @memset(layout.data[i - offset].data, 0);
             }
             return layout;
         }
@@ -56,7 +47,7 @@ pub fn NeuronLayout(skipFirst: bool) type {
             layout.data = try allocator.alloc([]f32, layers.len - offset);
             for (offset..layers.len) |i| {
                 const data = try allocator.alloc(f32, layers[i].size);
-                randomInit(data);
+                @memset(data, 0);
                 layout.data[i - offset] = data;
             }
             return layout;
@@ -82,14 +73,33 @@ pub const WeightsLayout = struct {
     pub fn getLayer(self: WeightsLayout, layerIdx: usize) la.Matrix(f32) {
         return self.data[layerIdx - 1];
     }
-    pub fn init(allocator: std.mem.Allocator, layers: []const net.Layer) !WeightsLayout {
+    pub fn init(allocator: std.mem.Allocator, layers: []const net.Layer, random: std.Random) !WeightsLayout {
         var layout: @This() = .{ .allocator = allocator, .data = undefined };
         layout.data = try allocator.alloc(la.Matrix(f32), layers.len - 1);
         for (1..layers.len) |i| {
             const prevLayerCount = layers[i - 1].size;
             const thisLayerCount = layers[i].size;
             layout.data[i - 1] = try la.Matrix(f32).init(allocator, prevLayerCount, thisLayerCount);
-            randomInit(layout.data[i - 1].data);
+            const fanIn: f32 = @floatFromInt(prevLayerCount);
+            const fanOut: f32 = @floatFromInt(thisLayerCount);
+            const standardDeviation = switch (layers[i].activation.weightInitialization) {
+                .xavier => @sqrt(2.0 / (fanIn + fanOut)),
+                .he => @sqrt(2.0 / fanIn),
+            };
+            for (layout.data[i - 1].data) |*weight| {
+                weight.* = random.floatNorm(f32) * standardDeviation;
+            }
+        }
+        return layout;
+    }
+    pub fn initZeroed(allocator: std.mem.Allocator, layers: []const net.Layer) !WeightsLayout {
+        var layout: @This() = .{ .allocator = allocator, .data = undefined };
+        layout.data = try allocator.alloc(la.Matrix(f32), layers.len - 1);
+        for (1..layers.len) |i| {
+            const prevLayerCount = layers[i - 1].size;
+            const thisLayerCount = layers[i].size;
+            layout.data[i - 1] = try la.Matrix(f32).init(allocator, prevLayerCount, thisLayerCount);
+            @memset(layout.data[i - 1].data, 0);
         }
         return layout;
     }

@@ -25,6 +25,7 @@ pub fn Activations() type {
                 .activation = &funcs.sigmoid,
                 .activationDeriv = &funcs.sigmoidDeriv,
                 .activationDerivFromActivation = &funcs.sigmoidDerivFromActivation,
+                .weightInitialization = .xavier,
             };
         }
         pub fn relu() Activation {
@@ -32,6 +33,7 @@ pub fn Activations() type {
                 .activation = &funcs.relu,
                 .activationDeriv = &funcs.reluDeriv,
                 .activationDerivFromActivation = &funcs.reluDeriv,
+                .weightInitialization = .he,
             };
         }
     };
@@ -41,4 +43,10 @@ pub const Activation = struct {
     activation: *const fn (f32) f32,
     activationDeriv: *const fn (f32) f32,
     activationDerivFromActivation: *const fn (f32) f32,
+    weightInitialization: WeightInitialization,
+};
+
+pub const WeightInitialization = enum {
+    xavier,
+    he,
 };

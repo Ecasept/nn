@@ -12,6 +12,7 @@ test {
 test "explicit forward pass" {
     const io = std.testing.io;
     const allocator = std.testing.allocator;
+    var prng = std.Random.DefaultPrng.init(67);
 
     const layers = [_]net.Layer{
         .{ .size = 2, .activation = act.Activations().relu() },
@@ -19,7 +20,7 @@ test "explicit forward pass" {
         .{ .size = 2, .activation = act.Activations().relu() },
     };
 
-    var runner = try nn.NetworkRunner.init(allocator, io, "", &layers, dl.EMPTY_DATA_LOADER, 1);
+    var runner = try nn.NetworkRunner.init(allocator, io, "", &layers, dl.EMPTY_DATA_LOADER, 1, prng.random());
 
     // Weights going to first neuron of second layer
     runner.network.weights.getWeight(1, 0, 0).* = 0.5;
@@ -116,7 +117,8 @@ test "learns XOR" {
     };
 
     const allocator = std.testing.allocator;
-    var network = try net.Network.init(allocator, &layers, inputsData.len);
+    var prng = std.Random.DefaultPrng.init(67);
+    var network = try net.Network.init(allocator, &layers, inputsData.len, prng.random());
     const activations = try network.initActivations(inputsData.len);
     const gradients = try network.initGradients();
     const costDerivatives = try network.initCostDerivatives(inputsData.len);
@@ -161,7 +163,8 @@ test "learns XOR" {
 }
 
 fn numericalGradientCheck(allocator: std.mem.Allocator, layers: []const net.Layer, inputs: la.ConstMatrix(f32), labels: la.ConstMatrix(f32), BATCH_SIZE: usize, EPSILON: f32, ABSOLUTE_ERROR_THRESHOLD: f32, RELATIVE_ERROR_THRESHOLD: f32) !void {
-    var network = try net.Network.init(allocator, layers, BATCH_SIZE);
+    var prng = std.Random.DefaultPrng.init(67);
+    var network = try net.Network.init(allocator, layers, BATCH_SIZE, prng.random());
     const activations = try network.initActivations(BATCH_SIZE);
     const normalGradients = try network.initGradients();
     const costDerivatives = try network.initCostDerivatives(BATCH_SIZE);

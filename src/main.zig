@@ -33,7 +33,8 @@ pub fn train(allocator: std.mem.Allocator, io: std.Io) !void {
     };
     const dl = dataLoader.getDataLoader();
     const BATCH_SIZE = 32;
-    var networkRunner = try neural.NetworkRunner.init(allocator, io, "assets/mnist_train.csv", &layers, dl, BATCH_SIZE);
+    var prng = std.Random.DefaultPrng.init(67);
+    var networkRunner = try neural.NetworkRunner.init(allocator, io, "assets/mnist_train.csv", &layers, dl, BATCH_SIZE, prng.random());
     defer networkRunner.deinit();
 
     std.debug.print("Training...\n", .{});
