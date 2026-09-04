@@ -47,3 +47,9 @@ The library implements a simple neural network. It features
 | Seed | Epochs | Batch size | Hidden size | Learning rate | Test accuracy |
 | ---: | -----: | ---------: | ----------: | ------------: | ------------: |
 |   67 |     20 |         32 |          32 |            10 |        96.52% |
+<img width="209" height="79" alt="Output from the training run after 20 epochs showing a test accuracy of 96.52%" src="https://github.com/user-attachments/assets/f562c5c8-a859-43bd-b4ed-8c090c11c564" />
+
+
+# License
+
+This project is licensed under the GNU General Public License v3.0 or later.
