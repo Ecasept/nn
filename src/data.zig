@@ -19,7 +19,8 @@ pub fn loadData(allocator: std.mem.Allocator, io: std.Io, filename: []const u8) 
     var dataList = try std.ArrayList(dl.DataPoint).initCapacity(allocator, 100);
 
     var rowIter = std.mem.splitSequence(u8, buffer, "\n");
-    while (rowIter.next()) |row| {
+    while (rowIter.next()) |rawRow| {
+        const row = std.mem.trimEnd(u8, rawRow, "\r");
         if (row.len == 0) {
             continue;
         }
