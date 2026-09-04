@@ -146,11 +146,15 @@ pub const NetworkRunner = struct {
         return accCost / @as(f32, @floatFromInt(self.trainingData.items.len));
     }
     pub fn testEpoch(self: NetworkRunner) f32 {
+        return self.accuracy(self.trainingData.items);
+    }
+
+    pub fn accuracy(self: NetworkRunner, data: []const dl.DataPoint) f32 {
         var correct: u64 = 0;
         var batch: usize = 0;
-        while (batch < self.trainingData.items.len) : (batch += self.batchSize) {
-            const batchEnd = @min(batch + self.batchSize, self.trainingData.items.len);
-            const dataPoints = self.trainingData.items[batch..batchEnd];
+        while (batch < data.len) : (batch += self.batchSize) {
+            const batchEnd = @min(batch + self.batchSize, data.len);
+            const dataPoints = data[batch..batchEnd];
             const isLastBatch = dataPoints.len < self.batchSize;
             self.loadBatch(dataPoints);
 
@@ -176,7 +180,7 @@ pub const NetworkRunner = struct {
                 self.releaseActivationView(activations);
             }
         }
-        return @as(f32, @floatFromInt(correct)) / @as(f32, @floatFromInt(self.trainingData.items.len));
+        return @as(f32, @floatFromInt(correct)) / @as(f32, @floatFromInt(data.len));
     }
 
     /// Must call `self.releaseActivationView(activations)` after using the returned activations.
